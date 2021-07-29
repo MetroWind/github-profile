@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::json;
 use reqwest;
@@ -6,7 +6,7 @@ use reqwest;
 use crate::error::Error;
 
 type VarMap<'a> = HashMap<&'a str, serde_json::Value>;
-pub type LangUsage = HashMap<String, usize>;
+pub type LangUsage = HashMap<String, u64>;
 
 macro_rules! varMap
 {
@@ -28,14 +28,12 @@ fn noVars() -> VarMap<'static>
 
 fn makePayload(query: &str, variables: &VarMap) -> Result<String, Error>
 {
-    // let vars = json!{"variables": variables};
-
     let vars_json = serde_json::to_value(variables).map_err(
         |_| rterr!("Failed to convert VarMap to JSON."))?;
     let data = json!({"variables": vars_json, "query": query});
     let r: String = serde_json::to_string_pretty(&data).map_err(
         |_| rterr!("Failed to serialize request"))?;
-    println!("{}", r);
+    // println!("{}", r);
     Ok(r)
 }
 
@@ -84,7 +82,41 @@ impl Client
     {
         let data = self.query(include_str!("../graphql/langs.graphql"),
                               &varMap!(("count": repo_count))).await?;
-        println!("{}", serde_json::to_string_pretty(&data).unwrap());
-        Ok(LangUsage::new())
+        let mut usage = LangUsage::new();
+        for repo in data["data"]["viewer"]["repositories"]["edges"].as_array()
+            .ok_or_else(|| rterr!("Invalid repositories"))?
+        {
+            for lang_edge in repo["node"]["languages"]["edges"].as_array()
+                .ok_or_else(|| rterr!("Invalid languages"))?
+            {
+                let size = lang_edge["size"].as_u64().ok_or_else(
+                    || rterr!("Invalid language size"))?;
+                let lang = lang_edge["node"]["name"].as_str().ok_or_else(
+                    || rterr!("Invalid language name"))?;
+                if let Some(s) = usage.get_mut(lang)
+                {
+                    *s += size;
+                }
+                else
+                {
+                    usage.insert(lang.to_owned(), size);
+                }
+            }
+        }
+        Ok(usage)
     }
+}
+
+pub fn topLanguages(mut usage: LangUsage, top_n: usize,
+                    ignores: HashSet<String>) -> Vec<(String, u64)>
+{
+    let mut langs: Vec<(String, u64)> = Vec::new();
+    for (lang, size) in usage.drain()
+    {
+        langs.push((lang, size));
+    }
+    langs.sort_by(
+        |pair1, pair2| pair1.1.partial_cmp(&pair2.1).unwrap().reverse());
+    langs.drain(..).filter(|pair| ignores.get(&pair.0).is_none()).take(top_n)
+        .collect()
 }

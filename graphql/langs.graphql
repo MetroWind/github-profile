@@ -3,7 +3,6 @@ query($count: Int!) {
     repositories(first: $count, isFork: false) {
       edges {
         node {
-          name
           languages(first: 10) {
             edges {
               node {
