@@ -108,7 +108,7 @@ impl Client
 }
 
 pub fn topLanguages(mut usage: LangUsage, top_n: usize,
-                    ignores: HashSet<String>) -> Vec<(String, u64)>
+                    ignores: &HashSet<String>) -> Vec<(String, u64)>
 {
     let mut langs: Vec<(String, u64)> = Vec::new();
     for (lang, size) in usage.drain()
