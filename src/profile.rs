@@ -34,9 +34,8 @@ impl Default for Profile
 
 impl Profile
 {
-    pub async fn getData(&mut self, token: &str) -> Result<(), Error>
+    pub async fn getData(&mut self, client: &github::Client) -> Result<(), Error>
     {
-        let client = github::Client::withToken(token)?;
         let usage = client.getOverallLangs(client.getRepoCount().await?).await?;
         self.top_langs = github::topLanguages(usage, self.top_langs_count,
                                               &self.top_langs_ignored);
@@ -86,7 +85,7 @@ height="{}" />"#,
 This is a test.</text>"#,
                            y + self.font_size * 1.5, 8));
         let y = y + self.font_size * 1.5;
-        lines.push("</svg>".to_owned());
+        lines.push("</svg>\n".to_owned());
         lines[0] = format!(r#"<svg version="1.1" baseProfile="full"
      width="{}" height="{}"
      xmlns="http://www.w3.org/2000/svg">"#, self.width, y + self.font_size * 1.5);

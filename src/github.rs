@@ -9,19 +9,6 @@ use crate::error::Error;
 type VarMap<'a> = HashMap<&'a str, serde_json::Value>;
 pub type LangUsage = HashMap<String, u64>;
 
-macro_rules! stringMap
-{
-    ( $( ( $k:literal : $v:expr ) ),* ) => {
-        {
-            let mut vars: HashMap<String, String> = HashMap::new();
-            $(
-                vars.insert(String::from($k), String::from($v));
-            )*
-            vars
-        }
-    };
-}
-
 macro_rules! varMap
 {
     ( $( ( $k:literal : $v:expr ) ),* ) => {
@@ -61,6 +48,23 @@ impl CommitHash
         Self {
             commit_hash: commit_hash.to_owned(),
             tree_hash: tree_hash.to_owned(),
+        }
+    }
+}
+
+struct FileHash
+{
+    path: String,
+    hash: String,
+}
+
+impl FileHash
+{
+    fn new(path: &str, hash: &str) -> Self
+    {
+        Self {
+            path: path.to_owned(),
+            hash: hash.to_owned(),
         }
     }
 }
@@ -161,7 +165,7 @@ impl Client
         Ok(usage)
     }
 
-    async fn getLogin(&self) -> Result<String, Error>
+    pub async fn getLogin(&self) -> Result<String, Error>
     {
         let data = self.query(include_str!("../graphql/viewer-login.graphql"),
                               &noVars()).await?;
@@ -183,12 +187,6 @@ impl Client
                  .ok_or_else(|| rterr!("Failed to extract tree hash"))?))
     }
 
-    pub async fn getProfileHead(&self) -> Result<CommitHash, Error>
-    {
-        let username = self.getLogin().await?;
-        self.getHead(&username, &username).await
-    }
-
     /// Return the hash of the new tree.
     async fn createTree(&self, owner: &str, repo: &str, path: &str,
                         base_tree: &str, content: &str) -> Result<String, Error>
@@ -196,15 +194,16 @@ impl Client
         let uri = format!("https://api.github.com/repos/{}/{}/git/trees",
                           owner, repo);
         let payload = json!({
+            "base_tree": base_tree,
             "tree": [{
-                "path": "README.md",
+                "path": path,
                 "mode": "100644",
                 "type": "blob",
                 "content": content,
-                "base_tree": base_tree,
             }]});
         let data = self.post(&uri, &payload)
             .await?;
+        println!("{}", serde_json::to_string_pretty(&data).unwrap());
         Ok(data["sha"].as_str().ok_or_else(
             || rterr!("Failed to extract hash from new tree"))?.to_owned())
     }
