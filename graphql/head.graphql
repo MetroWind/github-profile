@@ -1,0 +1,13 @@
+query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    object(expression: "HEAD") {
+      ... on Commit {
+        commitUrl
+        oid
+        tree {
+          oid
+        }
+      }
+    }
+  }
+}

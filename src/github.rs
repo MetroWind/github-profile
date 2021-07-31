@@ -1,12 +1,26 @@
 use std::collections::{HashMap, HashSet};
 
 use serde_json::json;
+use serde::Serialize;
 use reqwest;
 
 use crate::error::Error;
 
 type VarMap<'a> = HashMap<&'a str, serde_json::Value>;
 pub type LangUsage = HashMap<String, u64>;
+
+macro_rules! stringMap
+{
+    ( $( ( $k:literal : $v:expr ) ),* ) => {
+        {
+            let mut vars: HashMap<String, String> = HashMap::new();
+            $(
+                vars.insert(String::from($k), String::from($v));
+            )*
+            vars
+        }
+    };
+}
 
 macro_rules! varMap
 {
@@ -26,15 +40,29 @@ fn noVars() -> VarMap<'static>
     VarMap::new()
 }
 
-fn makePayload(query: &str, variables: &VarMap) -> Result<String, Error>
+fn makePayload(query: &str, variables: &VarMap) ->
+    Result<serde_json::Value, Error>
 {
     let vars_json = serde_json::to_value(variables).map_err(
         |_| rterr!("Failed to convert VarMap to JSON."))?;
-    let data = json!({"variables": vars_json, "query": query});
-    let r: String = serde_json::to_string_pretty(&data).map_err(
-        |_| rterr!("Failed to serialize request"))?;
-    // println!("{}", r);
-    Ok(r)
+    Ok(json!({"variables": vars_json, "query": query}))
+}
+
+struct CommitHash
+{
+    commit_hash: String,
+    tree_hash: String,
+}
+
+impl CommitHash
+{
+    pub fn new(commit_hash: &str, tree_hash: &str) -> Self
+    {
+        Self {
+            commit_hash: commit_hash.to_owned(),
+            tree_hash: tree_hash.to_owned(),
+        }
+    }
 }
 
 pub struct Client
@@ -58,15 +86,42 @@ impl Client
         Ok(Self { client: client })
     }
 
+
+    async fn get(&self, uri: &str) -> Result<serde_json::Value, Error>
+    {
+        let res = self.client.get(uri).send().await.map_err(
+                |e| rterr!("Failed to send request: {}", e))?
+            .error_for_status().map_err(|e| rterr!("Query failed: {}", e))?;
+        res.json().await.map_err(|_| rterr!("Failed to deserialize response"))
+    }
+
+    async fn post<T: Serialize + ?Sized>(&self, uri: &str, data: &T) ->
+        Result<serde_json::Value, Error>
+    {
+        let res = self.client.post(uri).json(&data).send().await.map_err(
+            |e| rterr!("Failed to send request: {}", e))?;
+        let uri: String = res.url().as_str().to_owned();
+        let status = res.status();
+        let payload: serde_json::Value = res.json().await.map_err(
+            |_| rterr!("Failed to deserialize response"))?;
+        if !status.is_success()
+        {
+            Err(rterr!("Request failed at URI {} with code {}. Payload:\n{}",
+                       uri, status.as_u16(),
+                       serde_json::to_string_pretty(&payload).unwrap()))
+        }
+        else
+        {
+            Ok(payload)
+        }
+    }
+
     /// Make a GraphQL query.
     async fn query(&self, q: &str, vars: &VarMap<'_>) ->
         Result<serde_json::Value, Error>
     {
-        let res = self.client.post("https://api.github.com/graphql")
-            .body(makePayload(q, vars)?).send().await.map_err(
-                |e| rterr!("Failed to send request: {}", e))?
-            .error_for_status().map_err(|e| rterr!("Query failed: {}", e))?;
-        res.json().await.map_err(|_| rterr!("Failed to deserialize response"))
+        self.post("https://api.github.com/graphql", &makePayload(q, vars)?)
+            .await
     }
 
     pub async fn getRepoCount(&self) -> Result<u64, Error>
@@ -104,6 +159,88 @@ impl Client
             }
         }
         Ok(usage)
+    }
+
+    async fn getLogin(&self) -> Result<String, Error>
+    {
+        let data = self.query(include_str!("../graphql/viewer-login.graphql"),
+                              &noVars()).await?;
+        Ok(data["data"]["viewer"]["login"].as_str().ok_or_else(
+            || rterr!("Failed to extract user login"))?.to_owned())
+    }
+
+    /// Get the HEAD commit of a repo.
+    async fn getHead(&self, owner: &str, name: &str) ->
+        Result<CommitHash, Error>
+    {
+        let data = self.query(include_str!("../graphql/head.graphql"),
+                              &varMap!(("name": name),
+                                       ("owner": owner))).await?;
+        Ok(CommitHash::new(
+            data["data"]["repository"]["object"]["oid"].as_str()
+                .ok_or_else(|| rterr!("Failed to extract commit hash"))?,
+            data["data"]["repository"]["object"]["tree"]["oid"].as_str()
+                 .ok_or_else(|| rterr!("Failed to extract tree hash"))?))
+    }
+
+    pub async fn getProfileHead(&self) -> Result<CommitHash, Error>
+    {
+        let username = self.getLogin().await?;
+        self.getHead(&username, &username).await
+    }
+
+    /// Return the hash of the new tree.
+    async fn createTree(&self, owner: &str, repo: &str, path: &str,
+                        base_tree: &str, content: &str) -> Result<String, Error>
+    {
+        let uri = format!("https://api.github.com/repos/{}/{}/git/trees",
+                          owner, repo);
+        let payload = json!({
+            "tree": [{
+                "path": "README.md",
+                "mode": "100644",
+                "type": "blob",
+                "content": content,
+                "base_tree": base_tree,
+            }]});
+        let data = self.post(&uri, &payload)
+            .await?;
+        Ok(data["sha"].as_str().ok_or_else(
+            || rterr!("Failed to extract hash from new tree"))?.to_owned())
+    }
+
+    /// Return hash of the new commit.
+    pub async fn commitSingleFile(&self, owner: &str, repo: &str, branch: &str,
+                                  path: &str, content: &str, msg: &str) ->
+        Result<String, Error>
+    {
+        // Create tree
+        let head = self.getHead(owner, repo).await?;
+        let new_tree = self.createTree(owner, repo, path, &head.tree_hash,
+                                       content).await?;
+        // Create commit
+        let uri = format!("https://api.github.com/repos/{}/{}/git/commits",
+                          owner, repo);
+        let payload = json!({
+            "message": msg,
+            "tree": new_tree,
+            "parents": [head.commit_hash],
+            "author": {
+                "name": "Profile Bot",
+                "email": "metrowind@github.com"
+            }});
+
+        let data = self.post(&uri, &payload).await?;
+        let new_commit = data["sha"].as_str().ok_or_else(
+            || rterr!("Failed to extract hash from new commit"))?;
+
+        // Update reference
+        let uri =
+            format!("https://api.github.com/repos/{}/{}/git/refs/heads/{}",
+                    owner, repo, branch);
+        let payload = json!({ "sha": new_commit });
+        let _ = self.post(&uri, &payload).await?;
+        Ok(new_commit.to_owned())
     }
 }
 

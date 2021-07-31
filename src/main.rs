@@ -13,6 +13,11 @@ pub async fn main() -> Result<(), Error>
 {
     let mut p = profile::Profile::default();
     p.getData(&std::env::args().nth(1).unwrap()).await?;
-    println!("{}", p.genSvg());
+    let svg = p.genSvg();
+
+    let client = github::Client::withToken(&std::env::args().nth(1).unwrap())?;
+    let hash = client.commitSingleFile("MetroWind", "test", "main", "profile.svg",
+                                       &svg, "Update profile SVG").await?;
+    println!("{}", hash);
     Ok(())
 }
