@@ -1,7 +1,24 @@
+use std::str::FromStr;
 use std::collections::HashSet;
 
 use crate::error::Error;
 use crate::github;
+
+// Define your enum
+pub enum Theme { Light, Dark }
+
+// Implement the trait
+impl FromStr for Theme {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "light" => Ok(Self::Light),
+            "dark" => Ok(Self::Dark),
+            _ => Err(rterr!("Invalid theme: {}", s)),
+        }
+    }
+}
 
 pub struct Profile
 {
@@ -10,6 +27,7 @@ pub struct Profile
     pub top_langs_count: usize,
     pub top_langs_ignored: HashSet<String>,
     pub top_langs_text_width: f64,
+    pub theme: Theme,
 
     top_langs: Vec<(String, u64)>,
 }
@@ -27,6 +45,8 @@ impl Default for Profile
             top_langs_count: 5,
             top_langs_ignored: ignores,
             top_langs_text_width: 150.0,
+            theme: Theme::Dark,
+
             top_langs: Vec::new(),
         }
     }
@@ -34,6 +54,15 @@ impl Default for Profile
 
 impl Profile
 {
+    fn colorForeground(&self) -> &str
+    {
+        match self.theme
+        {
+            Theme::Light => "black",
+            Theme::Dark => "rgb(201, 209, 217)",
+        }
+    }
+
     pub async fn getData(&mut self, client: &github::Client) -> Result<(), Error>
     {
         let usage = client.getOverallLangs(client.getRepoCount().await?).await?;
@@ -52,18 +81,24 @@ impl Profile
 text
 {{
 font-family: monospace;
-fill: currentColor;
+fill: {};
 font-size: {}px;
 }}
 .LangBar
 {{
-fill: currentColor;
+fill: {};
 }}
   </style>"#,
-                           self.font_size));
+                           self.colorForeground(), self.font_size,
+                           self.colorForeground()));
 
         let max_lang_size: f64 = self.top_langs[0].1 as f64;
         let lang_bar_max_width = 450.0;
+
+        lines.push(format!(
+            r#"<text x="0" y="{}" width="100%">Top languages:</text>"#,
+            self.font_size * 1.5));
+        let y = self.font_size * 1.5;
         for i in 0..self.top_langs.len()
         {
             let (lang, size) = self.top_langs[i].clone();
@@ -80,7 +115,7 @@ height="{}" />"#,
                                lang_bar_max_width * (size as f64) / max_lang_size,
                                self.font_size));
         }
-        let y = self.font_size * 1.5 * self.top_langs.len() as f64;
+        let y = y + self.font_size * 1.5 * self.top_langs.len() as f64;
         lines.push(format!(r#"<text x="0" y="{}" style="font-size: {}px">
 This is a test.</text>"#,
                            y + self.font_size * 1.5, 8));

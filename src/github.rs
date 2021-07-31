@@ -203,7 +203,6 @@ impl Client
             }]});
         let data = self.post(&uri, &payload)
             .await?;
-        println!("{}", serde_json::to_string_pretty(&data).unwrap());
         Ok(data["sha"].as_str().ok_or_else(
             || rterr!("Failed to extract hash from new tree"))?.to_owned())
     }

@@ -16,18 +16,24 @@ pub async fn main() -> Result<(), Error>
         .author("MetroWind <chris.corsair@gmail.com>")
         .about("Generate and commit GitHub profile SVG")
         .arg(clap::Arg::new("TOKEN")
-            .about("The personal token to authenticate with")
-            .required(true)
-            .index(1))
+             .about("The personal token to authenticate with")
+             .required(true)
+             .index(1))
         .arg(clap::Arg::new("branch")
-            .short('b')
-            .long("branch")
-            .value_name("BRANCH")
-            .about("Push the generated SVG to BRANCH. Default: master")
-            .takes_value(true))
+             .short('b')
+             .long("branch")
+             .value_name("BRANCH")
+             .about("Push the generated SVG to BRANCH. Default: master")
+             .takes_value(true))
+        .arg(clap::Arg::new("theme")
+             .short('t').long("theme").takes_value(true)
+             .possible_values(&["light", "dark"])
+             .about("Color theme (“light” or “dark”). Default: dark"))
         .get_matches();
 
     let mut p = profile::Profile::default();
+    p.theme = if let Ok(t) = matches.value_of_t("theme")
+    {t} else {profile::Theme::Dark};
     let client = github::Client::withToken(matches.value_of("TOKEN").unwrap())?;
     p.getData(&client).await?;
     let svg = p.genSvg();
