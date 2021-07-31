@@ -105,13 +105,14 @@ fill: {};
             lines.push(format!(r#"<text x="{}" y="{}" width="{}"
 text-anchor="end" >{}</text>"#,
                                self.width - lang_bar_max_width - 20.0,
-                               self.font_size * 1.5 * ((i+1) as f64),
+                               y + self.font_size * 1.5 * ((i+1) as f64),
                                self.width - lang_bar_max_width - 20.0,
                                lang));
             lines.push(format!(r#"<rect class="LangBar" x="{}" y="{}" width="{}"
 height="{}" />"#,
                                self.width - lang_bar_max_width,
-                               (self.font_size * 1.5 * i as f64) + 6.0,
+                               y + (self.font_size * 1.5 * i as f64)
+                               + self.font_size * 0.5,
                                lang_bar_max_width * (size as f64) / max_lang_size,
                                self.font_size));
         }

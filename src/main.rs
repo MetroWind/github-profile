@@ -29,6 +29,9 @@ pub async fn main() -> Result<(), Error>
              .short('t').long("theme").takes_value(true)
              .possible_values(&["light", "dark"])
              .about("Color theme (“light” or “dark”). Default: dark"))
+        .arg(clap::Arg::new("local-run")
+             .long("local-run")
+             .about("Only print the generated SVG. Do not commit."))
         .get_matches();
 
     let mut p = profile::Profile::default();
@@ -38,11 +41,18 @@ pub async fn main() -> Result<(), Error>
     p.getData(&client).await?;
     let svg = p.genSvg();
 
-    let branch =
-        if let Some(b) = matches.value_of("branch") {b} else {"master"};
-    let username = client.getLogin().await?;
-    let _ = client.commitSingleFile(&username, &username, branch, "profile.svg",
-                                    &svg, "Update profile SVG").await?;
-
+    if matches.is_present("local-run")
+    {
+        println!("{}", svg);
+    }
+    else
+    {
+        let branch =
+            if let Some(b) = matches.value_of("branch") {b} else {"master"};
+        let username = client.getLogin().await?;
+        let _ = client.commitSingleFile(
+            &username, &username, branch, "profile.svg", &svg,
+            "Update profile SVG").await?;
+    }
     Ok(())
 }
