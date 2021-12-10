@@ -1,6 +1,4 @@
 #![allow(non_snake_case)]
-use std::collections::HashSet;
-
 #[macro_use]
 mod error;
 mod github;
@@ -15,28 +13,34 @@ pub async fn main() -> Result<(), Error>
         .version("0.1")
         .author("MetroWind <chris.corsair@gmail.com>")
         .about("Generate and commit GitHub profile SVG")
-        .arg(clap::Arg::new("TOKEN")
-             .about("The personal token to authenticate with")
+        .arg(clap::Arg::with_name("TOKEN")
+             .help("The personal token to authenticate with")
              .required(true)
              .index(1))
-        .arg(clap::Arg::new("branch")
-             .short('b')
+        .arg(clap::Arg::with_name("branch")
+             .short("b")
              .long("branch")
              .value_name("BRANCH")
-             .about("Push the generated SVG to BRANCH. Default: master")
+             .help("Push the generated SVG to BRANCH. Default: master")
              .takes_value(true))
-        .arg(clap::Arg::new("theme")
-             .short('t').long("theme").takes_value(true)
+        .arg(clap::Arg::with_name("theme")
+             .short("t").long("theme").takes_value(true)
              .possible_values(&["light", "dark"])
-             .about("Color theme (“light” or “dark”). Default: dark"))
-        .arg(clap::Arg::new("local-run")
+             .help("Color theme (“light” or “dark”). Default: dark"))
+        .arg(clap::Arg::with_name("local-run")
              .long("local-run")
-             .about("Only print the generated SVG. Do not commit."))
+             .help("Only print the generated SVG. Do not commit."))
         .get_matches();
 
     let mut p = profile::Profile::default();
-    p.theme = if let Ok(t) = matches.value_of_t("theme")
-    {t} else {profile::Theme::Dark};
+    p.theme = if let Some(t) = matches.value_of("theme")
+    {
+        t.parse()?
+    }
+    else
+    {
+        profile::Theme::Dark
+    };
     let client = github::Client::withToken(matches.value_of("TOKEN").unwrap())?;
     p.getData(&client).await?;
     let svg = p.genSvg();
